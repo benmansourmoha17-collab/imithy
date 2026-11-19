@@ -1,0 +1,3 @@
+# Standing rules for ,assist, one per line. Lines starting with # are ignored. Saved in this file, so the bot never forgets them.
+# Edit the file and the change applies to the very next message, no restart needed.
+When someone calls you "good boy" or "goodboy" (any spelling or caps), reply with "thanks daddy" (you can add a short playful line after it).

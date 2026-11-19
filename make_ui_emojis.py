@@ -1,0 +1,192 @@
+"""make_ui_emojis.py - draws the clean UI icon set (original flat glyphs, transparent 128x128 PNG) and writes:
+
+  <out>/ui_emojis/<name>.png      one PNG per icon (upload by hand if you ever want to)
+  <out>/ui_emojis.py              UI_PACK = {emoji name: base64 chunks}, merged into the bot's EMOJI_PACK
+  <preview>                       a preview sheet (icons at emoji size + a mock pager row), only for looking at
+
+Usage:  python3 make_ui_emojis.py <out folder> <preview.png>
+The three join log badges (bl_jl_alert / bl_jl_warn / bl_jl_safe) are drawn by make_joinlog_icons.py and the W ratio badge (bl_wratio) by
+make_wratio_icon.py: run both AFTER this script, because this one rewrites ui_emojis.py without them.
+Needs rsvg-convert (librsvg) and Pillow. The bot itself needs neither: it only reads ui_emojis.py.
+"""
+import base64
+import os
+import subprocess
+import sys
+
+from PIL import Image, ImageDraw, ImageFont
+
+WHITE = "#F4F5F7"
+GREEN = "#38CC74"
+GREEN_DEEP = "#2FBF71"
+RED = "#F2555C"
+AMBER = "#F7B83D"
+BLUE = "#6C93FF"
+SLATE = "#C6CBD6"
+GREY = "#5C5F69"
+DARK = "#1E1F22"
+
+STROKE = 'fill="none" stroke-linecap="round" stroke-linejoin="round"'
+
+
+def svg(body):
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">{body}</svg>'
+
+
+def cross_glyph(color, w=17):
+    return (f'<path d="M38 38 L90 90 M90 38 L38 90" {STROKE} stroke="{color}" stroke-width="{w}"/>')
+
+
+def tick_glyph(color, w=17):
+    return (f'<path d="M26 68 L52 94 L102 36" {STROKE} stroke="{color}" stroke-width="{w}"/>')
+
+
+ICONS = {
+    # ---- pager (white glyphs: they sit on the grey / red buttons) ----
+    "bl_left": svg(f'<path d="M82 22 L42 64 L82 106" {STROKE} stroke="{WHITE}" stroke-width="18"/>'),
+    "bl_right": svg(f'<path d="M46 22 L86 64 L46 106" {STROKE} stroke="{WHITE}" stroke-width="18"/>'),
+    "bl_jump": svg(
+        f'<path d="M50 20 L42 108 M88 20 L80 108 M20 47 L108 47 M16 81 L104 81" {STROKE} stroke="{WHITE}" stroke-width="12"/>'),
+    # white versions, used automatically on green / red / blurple buttons (see button_icon in bot.py): bl_<key>_w
+    "bl_cross_w": svg(cross_glyph(WHITE)),
+    "bl_check_w": svg(tick_glyph(WHITE)),
+    "bl_add_w": svg(f'<path d="M64 26 L64 102 M26 64 L102 64" {STROKE} stroke="{WHITE}" stroke-width="17"/>'),
+    "bl_remove_w": svg(f'<path d="M26 64 L102 64" {STROKE} stroke="{WHITE}" stroke-width="17"/>'),
+    # ---- status lines (coloured glyphs for the dark card) ----
+    "bl_check": svg(tick_glyph(GREEN)),
+    "bl_cross": svg(cross_glyph(RED)),
+    "bl_warn": svg(
+        f'<path d="M64 20 L112 104 L16 104 Z" fill="{AMBER}" stroke="{AMBER}" stroke-width="14" stroke-linejoin="round"/>'
+        f'<path d="M64 52 L64 76" {STROKE} stroke="{DARK}" stroke-width="12"/>'
+        f'<circle cx="64" cy="91" r="7" fill="{DARK}"/>'),
+    "bl_info": svg(
+        f'<circle cx="64" cy="64" r="50" fill="{BLUE}"/>'
+        f'<circle cx="64" cy="38" r="7.5" fill="#FFFFFF"/>'
+        f'<path d="M64 58 L64 92" {STROKE} stroke="#FFFFFF" stroke-width="13"/>'),
+    "bl_add": svg(f'<path d="M64 26 L64 102 M26 64 L102 64" {STROKE} stroke="{GREEN}" stroke-width="17"/>'),
+    "bl_remove": svg(f'<path d="M26 64 L102 64" {STROKE} stroke="{RED}" stroke-width="17"/>'),
+    "bl_wait": svg(
+        f'<circle cx="64" cy="64" r="46" {STROKE} stroke="{SLATE}" stroke-width="11"/>'
+        f'<path d="M64 36 L64 66 L84 78" {STROKE} stroke="{SLATE}" stroke-width="11"/>'),
+    # ---- small tool icons ----
+    "bl_search": svg(
+        f'<circle cx="55" cy="55" r="31" {STROKE} stroke="{WHITE}" stroke-width="12"/>'
+        f'<path d="M79 79 L104 104" {STROKE} stroke="{WHITE}" stroke-width="15"/>'),
+    "bl_edit": svg(
+        f'<g transform="rotate(45 64 64)" fill="{WHITE}" stroke="{WHITE}" stroke-linejoin="round" stroke-width="4">'
+        f'<rect x="52" y="8" width="24" height="14" rx="5"/>'
+        f'<rect x="52" y="27" width="24" height="58" rx="2"/>'
+        f'<path d="M52 90 L76 90 L64 116 Z"/></g>'),
+    # ---- on / off pills ----
+    "bl_on": svg(
+        f'<rect x="6" y="32" width="116" height="64" rx="32" fill="{GREEN_DEEP}"/>'
+        f'<circle cx="92" cy="64" r="23" fill="#FFFFFF"/>'
+        f'<path d="M81 65 L89 73 L104 55" {STROKE} stroke="{GREEN_DEEP}" stroke-width="7"/>'),
+    "bl_off": svg(
+        f'<rect x="6" y="32" width="116" height="64" rx="32" fill="{GREY}"/>'
+        f'<circle cx="36" cy="64" r="23" fill="#FFFFFF"/>'
+        f'<path d="M28 56 L44 72 M44 56 L28 72" {STROKE} stroke="{GREY}" stroke-width="7"/>'),
+}
+
+
+def render(name, body, folder):
+    src = os.path.join(folder, name + ".svg")
+    dst = os.path.join(folder, name + ".png")
+    with open(src, "w", encoding="utf-8") as f:
+        f.write(body)
+    subprocess.run(["rsvg-convert", "-w", "128", "-h", "128", src, "-o", dst], check=True)
+    os.remove(src)
+    return dst
+
+
+def pack_module(paths, out_py):
+    lines = ['"""UI icon pack, generated by make_ui_emojis.py: pager arrows, page jump, white (_w) versions for coloured buttons, status icons, tool icons and on/off pills',
+             '(original flat drawings, 128x128 PNG). The bot creates these as application emojis on start-up (see make_app_emojis in matchmaking.py)',
+             'and looks them up as bl_<name>, for example emo("check") or style_buttons(view, {"Accept": "check"}).',
+             'The same files are in the ui_emojis folder if you would rather upload them to a server by hand."""',
+             "", "UI_PACK = {"]
+    for name, path in paths.items():
+        b64 = base64.b64encode(open(path, "rb").read()).decode()
+        lines.append(f'    "{name}": (')
+        chunks = [b64[i:i + 100] for i in range(0, len(b64), 100)]
+        for i, c in enumerate(chunks):
+            end = ")," if i == len(chunks) - 1 else ""
+            lines.append(f'        "{c}"{end}')
+    lines.append("}")
+    with open(out_py, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def font(size, bold=False):
+    for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",):
+        if os.path.exists(p):
+            return ImageFont.truetype(p, size)
+    return ImageFont.load_default()
+
+
+def preview(paths, out_png):
+    """Dark sheet like a Discord card: every icon big and at emoji size, then a mock pager row and status lines."""
+    S = 2  # scale for a sharper picture
+    W, H = 760 * S, 470 * S
+    img = Image.new("RGBA", (W, H), "#1E1F22")
+    d = ImageDraw.Draw(img)
+    card = (14 * S, 14 * S, W - 14 * S, H - 14 * S)
+    d.rounded_rectangle(card, 14 * S, fill="#2B2D31")
+
+    def icon(name, size):
+        im = Image.open(paths[name]).convert("RGBA")
+        return im.resize((size * S, size * S), Image.LANCZOS)
+
+    names = list(paths)
+    # row 1: every icon at 64px with its name
+    x0, y0 = 36 * S, 34 * S
+    cell = 76 * S
+    for i, n in enumerate(names):
+        cx = x0 + (i % 9) * cell
+        cy = y0 + (i // 9) * 106 * S
+        img.alpha_composite(icon(n, 56), (cx, cy))
+        d.text((cx, cy + 60 * S), n[3:], font=font(11 * S), fill="#9AA0AA")
+    # row 2: the same at real emoji size (22px), where they have to read
+    y = 262 * S
+    d.text((36 * S, y - 22 * S), "at emoji size (22 px)", font=font(11 * S), fill="#9AA0AA")
+    for i, n in enumerate(names):
+        img.alpha_composite(icon(n, 22), (36 * S + i * 36 * S, y))
+    # mock pager row: grey < > goto, red close
+    y = 318 * S
+    d.text((36 * S, y - 4 * S), "pager row", font=font(11 * S), fill="#9AA0AA")
+    bx = 36 * S
+    for n, fill in (("bl_left", "#4E5058"), ("bl_right", "#4E5058"), ("bl_jump", "#4E5058"), ("bl_cross_w", "#DA373C")):
+        d.rounded_rectangle((bx, y + 18 * S, bx + 56 * S, y + 54 * S), 8 * S, fill=fill)
+        img.alpha_composite(icon(n, 20), (bx + 18 * S, y + 26 * S))
+        bx += 66 * S
+    # mock status lines
+    ty = 318 * S
+    tx = 320 * S
+    for i, (n, text) in enumerate((("bl_check", "@user: Anti-nuke protection is now disabled"),
+                                    ("bl_warn", "@user: You're missing the Manage Messages permission."),
+                                    ("bl_cross", "@user: Couldn't find that member."),
+                                    ("bl_on", "Antinuke: 7 of 8 modules"),
+                                    ("bl_off", "Google Safe Mode"))):
+        yy = ty + i * 27 * S
+        img.alpha_composite(icon(n, 20), (tx, yy))
+        d.text((tx + 30 * S, yy + 2 * S), text, font=font(13 * S), fill="#DBDEE1")
+    img = img.convert("RGB")
+    img.save(out_png)
+
+
+def main():
+    out = sys.argv[1]
+    prev = sys.argv[2]
+    folder = os.path.join(out, "ui_emojis")
+    os.makedirs(folder, exist_ok=True)
+    paths = {}
+    for name, body in ICONS.items():
+        paths[name] = render(name, body, folder)
+    pack_module(paths, os.path.join(out, "ui_emojis.py"))
+    preview(paths, prev)
+    for n, p in paths.items():
+        print(f"{n:12s} {os.path.getsize(p):6d} bytes")
+
+
+if __name__ == "__main__":
+    main()

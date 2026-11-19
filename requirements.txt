@@ -1,0 +1,14 @@
+discord.py>=2.7
+aiohttp
+python-dotenv
+tzdata
+Pillow
+
+# optional, makes people pictures show exactly one clear face:
+# opencv-python-headless
+# numpy
+
+# optional, for ,assist music / voice (also needs ffmpeg installed on the host):
+# PyNaCl
+# yt-dlp
+# gTTS
